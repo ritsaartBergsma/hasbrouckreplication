@@ -4,6 +4,7 @@ library(timeDate)
 #set standard timezone
 Sys.setenv(TZ='GMT')
 
+#Use double backward slashes when defining the paths
 inputPath <- "C:\\Users\\Ritsaart\\Documents\\R\\Hasbrouck SAS\\Input\\";
 cleanedDataPath <- "C:\\Users\\Ritsaart\\Documents\\R\\Hasbrouck SAS\\Cleaned Data\\"
 
@@ -26,29 +27,30 @@ E_mini.SP500.March.set2 <- read.csv(paste(inputPath,"2000_trades-2000-03-ESM0.cs
 E_mini.SP500.April <- read.csv(paste(inputPath,"2000_trades-2000-04-ESM0.csv", sep = ""),header=TRUE, stringsAsFactors=FALSE)
 E_mini.SP500.May <- read.csv(paste(inputPath,"2000_trades-2000-05-ESM0.csv", sep = ""),header=TRUE, stringsAsFactors=FALSE)
 
-
-#moving average filter which filters per day (and thus avoids deleting the first few entries of each day).
-#input: data.frame with price data, variable which needs to be filtered on, threshold above which values
-# are deleted and the number of periods used for the moving average.
-movingAverageFilterCentered <- function(data,filterVar,threshold,n){
+#Simply moving average filter
+#input:
+#data: data frame for filtering
+#filterVar: variable which needs to be filtered
+#thresholdPercentages: percentage of the mean of the filterVar at which the
+#filterVar can deviate from the moving average
+#n: number of periods for the moving average
+movingAverageFilterCentered <- function(data,filterVar,thresholdPercentages,n){
   dates <- as.POSIXct(as.character(data[,"Date.L."]),format = "%Y%m%d",tz = "GMT");
-  a <- NULL;
-  for (i in unique(dates)) {
-    data2 <- data[dates == i,];
-    movingAverage <- as.numeric(filter(data2[,filterVar],rep(1/n,n), sides=2))
-    movingAverage[1:((n - 1) / 2 )] <- data2[1:((n - 1) / 2 ),filterVar];
-    data3 <- data2[(data2[,filterVar] - movingAverage < threshold),];
-    a <- rbind(a,data3);
-  }
-  return(a)
+  threshold <- mean(data[,filterVar],na.rm = TRUE) *  (thresholdPercenatages/100);
+  print(threshold);
+  movingAverage <- as.numeric(filter(data[,filterVar],rep(1/n,n), sides=2))
+  movingAverage[1:((n - 1) / 2 )] <- data[1:((n - 1) / 2 ),filterVar];
+  data2 <- data[(data[,filterVar] - movingAverage < threshold) & (movingAverage - data[,filterVar] < threshold),];
+  return(data2)
 }
 
 filterQuote <- function(quoteData) {
   #remove negative spreads and spreads greater than 1
   quoteData1 <- subset(quoteData, (Ask.Price - Bid.Price) > 0 & (Ask.Price - Bid.Price) <1);
   #remove prices 50 cents greater than moving avarage
-  quoteData2 <- movingAverageFilterCentered(quoteData1,"Ask.Price",0.5,11)
-  quoteData3 <- movingAverageFilterCentered(quoteData2,"Bid.Price",0.5,11)
+  #
+  quoteData2 <- movingAverageFilterCentered(quoteData1,"Ask.Price",0.1 ,11)
+  quoteData3 <- movingAverageFilterCentered(quoteData2,"Bid.Price",0.1,11)
   #remove empty values
   quoteData4 <- quoteData3[quoteData3["Quote.Time"] != "" & !is.na(quoteData3[,"Ask.Price"]) & !is.na(quoteData3[,"Bid.Price"]) & !is.na(quoteData3[,"Date.L."]),];
   return(quoteData4)
@@ -56,7 +58,7 @@ filterQuote <- function(quoteData) {
 
 filterTradeData <- function(tradeData) {
   #filter out values 50 cent larger than moving avarage of the past 10 days
-  step1 <- movingAverageFilterCentered(tradeData,"Price",0.5,11)
+  step1 <- movingAverageFilterCentered(tradeData,"Price",0.1,11)
   #filter out unusual trades
   step2 <- step1[step1["Type"] == "Trade",];
   step3 <- step2[step2["Exch.Time"] != "" & !is.na(step2[,"Price"]) & !is.na(step2[,"Date.L."]),];
@@ -121,7 +123,7 @@ E_mini.SP500.March <- rollOver(E_mini.SP500.March.set1,E_mini.SP500.March.set2,2
 pit_price.SP500.March <- rollOver(pit_price.SP500.March.set1,pit_price.SP500.March.set2,20000309);
 
 # Aggregate the monthly data.
-ETF.SP500.Quote <- rbind(ETF.SP500.March.Quote,ETF.SP500.April.Quote,ETF.SP500.May.Quote);
+ETF.SP500.Quote <- rbind(ETF.SP500.March.Quote, ETF.SP500.April.Quote, ETF.SP500.May.Quote);
 ETF.SP500.trade <- rbind(ETF.SP500.March.trade,ETF.SP500.April.trade,ETF.SP500.May.trade);
 pit_price.SP500 <- rbind(pit_price.SP500.March,pit_price.SP500.April,pit_price.SP500.May);
 E_mini.SP500 <- rbind(E_mini.SP500.March,E_mini.SP500.April,E_mini.SP500.May);
@@ -156,6 +158,7 @@ pVector <- merge.xts(ETF.SP500.Quote.xts,merge.xts(ETF.SP500.trade.xts,
                                                    merge.xts(pit_price.SP500.xts,merge.xts(E_mini.SP500.trade.xts, marketTimes,join = "right"),
                                                              join = "right"),join = "right"),join = "right")
 
+colnames(pVector) <- c("ETF Quote Midpoint","ETF Trade Price","Pit Contract Price","E-mini Contract Price")
 write.zoo(pVector,file = paste(cleanedDataPath,"pVector.csv",sep = ""),sep = ",");
 
 
